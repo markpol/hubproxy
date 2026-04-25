@@ -18,7 +18,7 @@ type Event struct {
 	Repository   string          `json:"repository,omitempty"`
 	Sender       string          `json:"sender,omitempty"`
 	ReplayedFrom string          `json:"replayed_from,omitempty"` // Original event ID if this is a replay
-	OriginalTime time.Time       `json:"original_time,omitempty"` // Original event time if this is a replay
+	ReplayedTime time.Time       `json:"replayed_time,omitempty"` // Replay event time if this is a replay
 }
 
 // QueryOptions contains options for querying events
@@ -43,6 +43,9 @@ type TypeStat struct {
 type Storage interface {
 	// StoreEvent stores a webhook event
 	StoreEvent(ctx context.Context, event *Event) error
+
+	// UpdateEvent updates an existing event (e.g. to set forwarded_at or error)
+	UpdateEvent(ctx context.Context, event *Event) error
 
 	// MarkForwarded marks an event as forwarded by setting the forwarded_at timestamp
 	MarkForwarded(ctx context.Context, id string) error

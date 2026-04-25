@@ -74,11 +74,11 @@ func NewSchema(store storage.Storage, logger *slog.Logger) (*Schema, error) {
 			"replayedFrom": &graphql.Field{
 				Type: graphql.String,
 			},
-			"originalTime": &graphql.Field{
+			"ReplayedTime": &graphql.Field{
 				Type: graphql.DateTime,
 				Resolve: func(p graphql.ResolveParams) (interface{}, error) {
 					if event, ok := p.Source.(*storage.Event); ok {
-						return event.OriginalTime, nil
+						return event.ReplayedTime, nil
 					}
 					return nil, nil
 				},

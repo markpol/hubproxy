@@ -2,7 +2,6 @@ package api
 
 import (
 	"encoding/json"
-	"fmt"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -167,21 +166,21 @@ func (h *Handler) ReplayEvent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Create new event with same payload but new ID and timestamp
+	// Create event with re
 	replayEvent := &storage.Event{
-		ID:           fmt.Sprintf("%s-replay-%s", event.ID, uuid.New().String()), // Format: original-id-replay-uuid
+		ID:           event.ID,
 		Type:         event.Type,
 		Payload:      event.Payload,
 		Headers:      event.Headers,
-		CreatedAt:    time.Now(),
+		CreatedAt:    event.CreatedAt,
 		Repository:   event.Repository,
 		Sender:       event.Sender,
-		ReplayedFrom: event.ID,
-		OriginalTime: event.CreatedAt,
+		ReplayedFrom: uuid.New().String(),
+		ReplayedTime: time.Now(),
 	}
 
 	// Store the replayed event
-	if err := h.store.StoreEvent(r.Context(), replayEvent); err != nil {
+	if err := h.store.UpdateEvent(r.Context(), replayEvent); err != nil {
 		h.logger.Error("Error storing replayed event", "error", err)
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
@@ -282,18 +281,18 @@ func (h *Handler) ReplayRange(w http.ResponseWriter, r *http.Request) {
 	replayedEvents := make([]*storage.Event, 0, len(events))
 	for _, event := range events {
 		replayEvent := &storage.Event{
-			ID:           fmt.Sprintf("%s-replay-%s", event.ID, uuid.New().String()), // Format: original-id-replay-uuid
+			ID:           event.ID,
 			Type:         event.Type,
 			Payload:      event.Payload,
 			Headers:      event.Headers,
-			CreatedAt:    time.Now(),
+			CreatedAt:    event.CreatedAt,
 			Repository:   event.Repository,
 			Sender:       event.Sender,
-			ReplayedFrom: event.ID,
-			OriginalTime: event.CreatedAt,
+			ReplayedFrom: uuid.New().String(),
+			ReplayedTime: time.Now(),
 		}
 
-		if err := h.store.StoreEvent(r.Context(), replayEvent); err != nil {
+		if err := h.store.UpdateEvent(r.Context(), replayEvent); err != nil {
 			h.logger.Error("Error storing replayed event", "error", err)
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return

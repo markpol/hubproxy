@@ -3,10 +3,10 @@ package api_test
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 	"time"
 
@@ -62,7 +62,7 @@ func TestAPIHandler(t *testing.T) {
 	}
 
 	// Create API handler
-	logger := slog.New(slog.NewJSONHandler(nil, nil))
+	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
 	handler := api.NewHandler(store, logger)
 
 	t.Run("List Events", func(t *testing.T) {
@@ -263,10 +263,17 @@ func TestAPIHandler(t *testing.T) {
 					// Verify replayed event fields
 					event := result.Events[0]
 
-					assert.True(t, strings.HasPrefix(event.ID, "test-event-1-replay-"))
-					assert.Equal(t, "test-event-1", event.ReplayedFrom)
+					assert.Equal(t, "test-event-1", event.ID)
+					assert.NotEmpty(t, event.ReplayedFrom)
+					assert.NotEqual(t, "test-event-1", event.ReplayedFrom)
 					assert.Equal(t, "push", event.Type)
 					assert.Equal(t, "test/repo-1", event.Repository)
+
+					stored, err := store.GetEvent(context.Background(), "test-event-1")
+					require.NoError(t, err)
+					require.NotNil(t, stored)
+					assert.Equal(t, event.ReplayedFrom, stored.ReplayedFrom)
+					assert.False(t, stored.ReplayedTime.IsZero())
 				},
 			},
 			{
@@ -287,9 +294,18 @@ func TestAPIHandler(t *testing.T) {
 
 					assert.Equal(t, 2, result.ReplayedCount) // Should find both pull_request events
 					for _, e := range result.Events {
+						assert.NotEmpty(t, e.ReplayedFrom)
 						assert.Equal(t, "pull_request", e.Type)
 						assert.Equal(t, "test/repo-2", e.Repository)
 						assert.Equal(t, "user-2", e.Sender)
+					}
+
+					for _, id := range []string{"test-event-2", "test-event-5"} {
+						stored, err := store.GetEvent(context.Background(), id)
+						require.NoError(t, err)
+						require.NotNil(t, stored)
+						assert.NotEmpty(t, stored.ReplayedFrom)
+						assert.False(t, stored.ReplayedTime.IsZero())
 					}
 				},
 			},
@@ -310,6 +326,7 @@ func TestAPIHandler(t *testing.T) {
 
 					assert.Equal(t, 1, result.ReplayedCount)
 					require.Len(t, result.Events, 1)
+					assert.NotEmpty(t, result.Events[0].ReplayedFrom)
 				},
 			},
 			{

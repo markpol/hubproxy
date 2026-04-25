@@ -95,8 +95,8 @@ CREATE TABLE events (
     error       TEXT,                       -- Error message if delivery failed
     repository  VARCHAR(255),               -- Repository full name
     sender      VARCHAR(255),               -- GitHub username
-    replayed_from VARCHAR(255),             -- Original event ID if this is a replay
-    original_time TIMESTAMP                 -- Original event time if this is a replay
+    replayed_from VARCHAR(255),             -- Replay marker for the latest replay request
+    replayed_time TIMESTAMP                 -- When the latest replay was requested
 );
 
 -- Indexes for efficient querying
@@ -137,46 +137,30 @@ events, err := storage.ListEvents(QueryOptions{
 })
 ```
 
-### Querying Replay Events
-
-You can query replayed events using the `forwarded` filter. For example, to list all replayed events:
-
-```go
-events, err := storage.ListEvents(QueryOptions{
-    Forwarded:  true,
-})
-```
-
-You can also query original events that have been replayed using the `HasReplayedEvents` filter:
-
-```go
-events, err := storage.ListEvents(QueryOptions{
-    HasReplayedEvents: true,
-})
-```
-
 ### Event Replay
 
 HubProxy allows you to replay webhook events for testing, recovery, or debugging purposes.
 
-#### Replay ID Format
+Replays now update the stored event in place instead of inserting a second replay row. That means:
 
-Each replayed event has an ID in the format: `original-id-replay-uuid`
-
-For example:
-- Original event ID: `d2a1f85a-delivery-id-123`
-- Replayed event ID: `d2a1f85a-delivery-id-123-replay-abc123`
-
-This format ensures:
-1. Easy tracing back to original event
-2. Unique IDs for multiple replays of same event
-3. Clear identification of replayed events
+1. The event keeps the same `id` and `created_at` values.
+2. The latest replay request is recorded in `replayed_from`.
+3. The latest replay timestamp is recorded in `replayed_from` in REST responses and `ReplayedTime` in GraphQL.
+4. Replaying the same event multiple times overwrites the previous replay metadata instead of creating additional rows.
 
 #### Replay Single Event
 
 ```go
-// Replay a single event by its ID
-event, err := storage.ReplayEvent("d2a1f85a-delivery-id-123")
+// Fetch an event and update it in place with replay metadata.
+event, err := store.GetEvent(ctx, "d2a1f85a-delivery-id-123")
+if err != nil {
+  return err
+}
+
+event.ReplayedFrom = "latest-replay-request-id"
+event.ReplayedTime = time.Now()
+
+err = store.UpdateEvent(ctx, event)
 ```
 
 ### Development Tools
@@ -399,22 +383,23 @@ Returns event type statistics for a given time period.
 POST /api/events/{id}/replay
 ```
 
-Replays a specific webhook event by its ID. The ID should be GitHub's original delivery ID.
+Replays a specific webhook event by its ID. The original stored event is updated in place with replay metadata; no new event row is inserted.
 
 **Response Fields:**
-- `id`: Unique event ID in format `original-id-replay-uuid`
+- `id`: The original GitHub delivery ID for the event
 - `type`: GitHub event type (e.g., "push", "pull_request")
 - `payload`: Original webhook payload from GitHub
-- `created_at`: When the event was replayed
+- `created_at`: When the event was originally received
 - `forwarded_at`: When the event was forwarded (null if not yet forwarded)
 - `repository`: Repository full name
 - `sender`: GitHub username that triggered the event
-- `replayed_from`: ID of the original event that was replayed
+- `replayed_from`: Replay marker for the latest replay request
+- `replayed_time`: When the latest replay was requested
 
 **Response Example:**
 ```json
 {
-  "id": "d2a1f85a-delivery-id-123-replay-abc123",
+  "id": "d2a1f85a-delivery-id-123",
   "type": "push",
   "payload": {
     "ref": "refs/heads/main",
@@ -433,7 +418,8 @@ Replays a specific webhook event by its ID. The ID should be GitHub's original d
   "forwarded_at": null,
   "repository": "owner/repo",
   "sender": "username",
-  "replayed_from": "d2a1f85a-delivery-id-123"
+  "replayed_from": "abc123-replay-request-id",
+  "replayed_time": "2024-02-06T00:05:00Z"
 }
 ```
 
@@ -443,7 +429,7 @@ Replays a specific webhook event by its ID. The ID should be GitHub's original d
 POST /api/replay
 ```
 
-Replays all webhook events within a specified time range.
+Replays all webhook events within a specified time range by updating each matching stored event in place.
 
 **Query Parameters:**
 - `since` (required): Start time in RFC3339 format (e.g., "2024-02-01T00:00:00Z")
@@ -455,14 +441,15 @@ Replays all webhook events within a specified time range.
 **Response Fields:**
 - `replayed_count`: Number of events replayed
 - `events`: List of replayed events with:
-  - `id`: Unique event ID in format `original-id-replay-uuid`
+  - `id`: Original GitHub delivery ID for the event
   - `type`: GitHub event type (e.g., "push", "pull_request")
   - `payload`: Original webhook payload from GitHub
-  - `created_at`: When the event was replayed
+  - `created_at`: When the event was originally received
   - `forwarded_at`: When the event was forwarded (null if not yet forwarded)
   - `repository`: Repository full name
   - `sender`: GitHub username that triggered the event
-  - `replayed_from`: ID of the original event that was replayed
+  - `replayed_from`: Replay marker for the latest replay request
+  - `replayed_time`: When the latest replay was requested
 
 **Response Example:**
 ```json
@@ -470,7 +457,7 @@ Replays all webhook events within a specified time range.
   "replayed_count": 5,
   "events": [
     {
-      "id": "d2a1f85a-delivery-id-123-replay-abc123",
+      "id": "d2a1f85a-delivery-id-123",
       "type": "push",
       "payload": {
         "ref": "refs/heads/main",
@@ -489,7 +476,8 @@ Replays all webhook events within a specified time range.
       "forwarded_at": null,
       "repository": "owner/repo",
       "sender": "username",
-      "replayed_from": "d2a1f85a-delivery-id-123"
+      "replayed_from": "abc123-replay-request-id",
+      "replayed_time": "2024-02-06T00:05:00Z"
     },
     ...
   ]
@@ -530,7 +518,7 @@ query {
       repository
       sender
       replayedFrom
-      originalTime
+      ReplayedTime
     }
     total
   }
@@ -577,11 +565,13 @@ mutation {
       type
       forwardedAt
       replayedFrom
-      originalTime
+      ReplayedTime
     }
   }
 }
 ```
+
+`replayEvent` updates the existing event in place. The returned `id` remains the original event ID, while `replayedFrom` and `ReplayedTime` reflect the latest replay metadata.
 
 ##### Replay Events by Time Range
 
@@ -601,11 +591,13 @@ mutation {
       type
       forwardedAt
       replayedFrom
-      originalTime
+      ReplayedTime
     }
   }
 }
 ```
+
+`replayRange` also updates matching events in place. Replaying the same event multiple times overwrites the previous replay metadata instead of creating additional replay rows.
 
 ### Prometheus Metrics
 ```

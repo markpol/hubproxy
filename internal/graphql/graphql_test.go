@@ -9,7 +9,6 @@ import (
 	"net/http/httptest"
 	"os"
 	"sort"
-	"strings"
 	"testing"
 	"time"
 
@@ -239,10 +238,63 @@ func TestGraphQLMutations(t *testing.T) {
 		require.Len(t, events, 1, "Expected 1 replayed event")
 
 		event := events[0].(map[string]interface{})
-		assert.True(t, strings.HasPrefix(event["id"].(string), "test-event-1-replay-"),
-			"Replayed event ID should start with 'test-event-1-replay-'")
+		assert.Equal(t, "test-event-1", event["id"])
 		assert.Equal(t, "push", event["type"])
-		assert.Equal(t, "test-event-1", event["replayedFrom"])
+		assert.NotEmpty(t, event["replayedFrom"])
+		assert.NotEqual(t, "test-event-1", event["replayedFrom"])
+
+		stored, err := store.GetEvent(context.Background(), "test-event-1")
+		require.NoError(t, err)
+		require.NotNil(t, stored)
+		assert.Equal(t, event["replayedFrom"], stored.ReplayedFrom)
+		assert.False(t, stored.ReplayedTime.IsZero())
+
+		count, err := store.CountEvents(context.Background(), storage.QueryOptions{})
+		require.NoError(t, err)
+		assert.Equal(t, 2, count)
+	})
+
+	t.Run("Replay Range", func(t *testing.T) {
+		event1, err := store.GetEvent(context.Background(), "test-event-1")
+		require.NoError(t, err)
+		require.NotNil(t, event1)
+		event2, err := store.GetEvent(context.Background(), "test-event-2")
+		require.NoError(t, err)
+		require.NotNil(t, event2)
+
+		replayRangeResult, err := schema.resolveReplayRange(graphql.ResolveParams{
+			Context: context.Background(),
+			Args: map[string]interface{}{
+				"since":      event1.CreatedAt.Add(-time.Minute),
+				"until":      event2.CreatedAt.Add(time.Minute),
+				"repository": "test/repo",
+			},
+		})
+		require.NoError(t, err)
+
+		replayRange := replayRangeResult.(map[string]interface{})
+		replayedCount := replayRange["replayedCount"].(int)
+
+		assert.Equal(t, 2, replayedCount)
+
+		events := replayRange["events"].([]*storage.Event)
+		require.Len(t, events, 2)
+		for _, event := range events {
+			assert.NotEmpty(t, event.ID)
+			assert.NotEmpty(t, event.ReplayedFrom)
+		}
+
+		for _, id := range []string{"test-event-1", "test-event-2"} {
+			stored, err := store.GetEvent(context.Background(), id)
+			require.NoError(t, err)
+			require.NotNil(t, stored)
+			assert.NotEmpty(t, stored.ReplayedFrom)
+			assert.False(t, stored.ReplayedTime.IsZero())
+		}
+
+		count, err := store.CountEvents(context.Background(), storage.QueryOptions{})
+		require.NoError(t, err)
+		assert.Equal(t, 2, count)
 	})
 }
 

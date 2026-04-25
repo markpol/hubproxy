@@ -126,21 +126,21 @@ func (s *Schema) resolveReplayEvent(p graphql.ResolveParams) (interface{}, error
 		return nil, fmt.Errorf("event not found")
 	}
 
-	// Create new event with same payload but new ID and timestamp
+	// Update the existing event with replay metadata.
 	replayEvent := &storage.Event{
-		ID:           fmt.Sprintf("%s-replay-%s", event.ID, uuid.New().String()), // Format: original-id-replay-uuid
+		ID:           event.ID,
 		Type:         event.Type,
 		Payload:      event.Payload,
 		Headers:      event.Headers,
-		CreatedAt:    time.Now(),
+		CreatedAt:    event.CreatedAt,
 		Repository:   event.Repository,
 		Sender:       event.Sender,
-		ReplayedFrom: event.ID,
-		OriginalTime: event.CreatedAt,
+		ReplayedFrom: uuid.New().String(),
+		ReplayedTime: time.Now(),
 	}
 
-	// Store the replayed event
-	if err := s.store.StoreEvent(p.Context, replayEvent); err != nil {
+	// Persist the replay update on the existing event.
+	if err := s.store.UpdateEvent(p.Context, replayEvent); err != nil {
 		s.logger.Error("Error storing replayed event", "error", err)
 		return nil, err
 	}
@@ -205,18 +205,18 @@ func (s *Schema) resolveReplayRange(p graphql.ResolveParams) (interface{}, error
 	replayedEvents := make([]*storage.Event, 0, len(events))
 	for _, event := range events {
 		replayEvent := &storage.Event{
-			ID:           fmt.Sprintf("%s-replay-%s", event.ID, uuid.New().String()), // Format: original-id-replay-uuid
+			ID:           event.ID,
 			Type:         event.Type,
 			Payload:      event.Payload,
 			Headers:      event.Headers,
-			CreatedAt:    time.Now(),
+			CreatedAt:    event.CreatedAt,
 			Repository:   event.Repository,
 			Sender:       event.Sender,
-			ReplayedFrom: event.ID,
-			OriginalTime: event.CreatedAt,
+			ReplayedFrom: uuid.New().String(),
+			ReplayedTime: time.Now(),
 		}
 
-		if err := s.store.StoreEvent(p.Context, replayEvent); err != nil {
+		if err := s.store.UpdateEvent(p.Context, replayEvent); err != nil {
 			s.logger.Error("Error storing replayed event", "error", err)
 			return nil, err
 		}

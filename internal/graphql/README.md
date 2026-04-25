@@ -30,7 +30,7 @@ query {
       repository
       sender
       replayedFrom
-      originalTime
+      ReplayedTime
     }
     total
   }
@@ -50,7 +50,7 @@ query {
     repository
     sender
     replayedFrom
-    originalTime
+    ReplayedTime
   }
 }
 ```
@@ -70,6 +70,8 @@ query {
 
 ### `replayEvent` - Replay a single webhook event
 
+This mutation updates the existing stored event in place. The returned `id` remains the original delivery ID, while `replayedFrom` and `ReplayedTime` describe the latest replay request.
+
 ```graphql
 mutation {
   replayEvent(id: "event-id") {
@@ -82,13 +84,15 @@ mutation {
       repository
       sender
       replayedFrom
-      originalTime
+      ReplayedTime
     }
   }
 }
 ```
 
 ### `replayRange` - Replay multiple webhook events within a time range
+
+This mutation updates each matching stored event in place rather than inserting separate replay rows. Replaying the same event again overwrites the previous replay metadata.
 
 ```graphql
 mutation {
@@ -109,7 +113,7 @@ mutation {
       repository
       sender
       replayedFrom
-      originalTime
+      ReplayedTime
     }
   }
 }

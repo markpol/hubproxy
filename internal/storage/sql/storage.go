@@ -107,7 +107,7 @@ func (s *Storage) StoreEvent(ctx context.Context, event *storage.Event) error {
 
 func (s *Storage) GetEvent(ctx context.Context, id string) (*storage.Event, error) {
 	query := s.builder.
-		Select("id", "type", "headers", "payload", "created_at", "forwarded_at", "error", "repository", "sender").
+		Select("id", "type", "headers", "payload", "created_at", "forwarded_at", "error", "repository", "sender", "replayed_from", "replayed_time").
 		From(s.tableName).
 		Where("id = ?", id).
 		Limit(1)
@@ -115,6 +115,8 @@ func (s *Storage) GetEvent(ctx context.Context, id string) (*storage.Event, erro
 	var event storage.Event
 	var payload []byte
 	var headers []byte
+	var replayedFrom sql.NullString
+	var replayedTime sql.NullTime
 	err := query.RunWith(s.db).QueryRowContext(ctx).Scan(
 		&event.ID,
 		&event.Type,
@@ -125,6 +127,8 @@ func (s *Storage) GetEvent(ctx context.Context, id string) (*storage.Event, erro
 		&event.Error,
 		&event.Repository,
 		&event.Sender,
+		&replayedFrom,
+		&replayedTime,
 	)
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -135,12 +139,18 @@ func (s *Storage) GetEvent(ctx context.Context, id string) (*storage.Event, erro
 
 	event.Headers = headers
 	event.Payload = json.RawMessage(payload)
+	if replayedFrom.Valid {
+		event.ReplayedFrom = replayedFrom.String
+	}
+	if replayedTime.Valid {
+		event.ReplayedTime = replayedTime.Time
+	}
 	return &event, nil
 }
 
 func (s *Storage) ListEvents(ctx context.Context, opts storage.QueryOptions) ([]*storage.Event, int, error) {
 	query := s.builder.
-		Select("id", "type", "headers", "payload", "created_at", "forwarded_at", "error", "repository", "sender").
+		Select("id", "type", "headers", "payload", "created_at", "forwarded_at", "error", "repository", "sender", "replayed_from", "replayed_time").
 		From(s.tableName)
 
 	query = s.addQueryConditions(query, opts)
@@ -174,6 +184,8 @@ func (s *Storage) ListEvents(ctx context.Context, opts storage.QueryOptions) ([]
 		var event storage.Event
 		var payload []byte
 		var headers []byte
+		var replayedFrom sql.NullString
+		var replayedTime sql.NullTime
 		err := rows.Scan(
 			&event.ID,
 			&event.Type,
@@ -184,12 +196,20 @@ func (s *Storage) ListEvents(ctx context.Context, opts storage.QueryOptions) ([]
 			&event.Error,
 			&event.Repository,
 			&event.Sender,
+			&replayedFrom,
+			&replayedTime,
 		)
 		if err != nil {
 			return nil, 0, fmt.Errorf("scanning event: %w", err)
 		}
 		event.Headers = headers
 		event.Payload = json.RawMessage(payload)
+		if replayedFrom.Valid {
+			event.ReplayedFrom = replayedFrom.String
+		}
+		if replayedTime.Valid {
+			event.ReplayedTime = replayedTime.Time
+		}
 		events = append(events, &event)
 	}
 

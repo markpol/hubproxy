@@ -74,6 +74,32 @@ func (s *BaseStorage) StoreEvent(ctx context.Context, event *storage.Event) erro
 	return nil
 }
 
+// UpdateEvent update a replayed webhook event in the database
+func (s *BaseStorage) UpdateEvent(ctx context.Context, event *storage.Event) error {
+	// Use the existing builder's placeholder format
+	query := s.builder.
+		Update(s.tableName).
+		SetMap(map[string]interface{}{
+			"type":          event.Type,
+			"payload":       event.Payload,
+			"headers":       event.Headers,
+			"created_at":    event.CreatedAt,
+			"forwarded_at":  event.ForwardedAt,
+			"error":         event.Error,
+			"repository":    event.Repository,
+			"sender":        event.Sender,
+			"replayed_from": event.ReplayedFrom,
+			"replayed_time": event.ReplayedTime,
+		}).
+		Where(sq.Eq{"id": event.ID})
+
+	_, err := query.RunWith(s.db).ExecContext(ctx)
+	if err != nil {
+		return fmt.Errorf("updating event: %w", err)
+	}
+	return nil
+}
+
 // ListEvents lists webhook events based on query options
 func (s *BaseStorage) ListEvents(ctx context.Context, opts storage.QueryOptions) ([]*storage.Event, int, error) {
 	// Build base query

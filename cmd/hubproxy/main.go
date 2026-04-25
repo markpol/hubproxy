@@ -273,8 +273,8 @@ func run() error {
 
 	apiRouter.Get("/api/events", apiHandler.ListEvents)
 	apiRouter.Get("/api/stats", apiHandler.GetStats)
-	apiRouter.Get("/api/events/{id}", apiHandler.ReplayEvent)
-	apiRouter.Get("/api/replay", apiHandler.ReplayRange)
+	apiRouter.Post("/api/events/{id}", apiHandler.ReplayEvent)
+	apiRouter.Post("/api/replay", apiHandler.ReplayRange)
 	apiRouter.Handle("/metrics", promhttp.Handler())
 
 	// Add GraphQL endpoint

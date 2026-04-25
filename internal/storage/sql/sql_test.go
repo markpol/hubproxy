@@ -253,3 +253,95 @@ func TestForwardedAtField(t *testing.T) {
 		}
 	}
 }
+
+func TestUpdateEvent(t *testing.T) {
+	ctx := context.Background()
+	store, err := sql.New("sqlite:file:test_update.db?mode=memory&cache=shared")
+	require.NoError(t, err)
+	defer store.Close()
+
+	createdAt := time.Now().UTC().Truncate(time.Second)
+	forwardedAt := createdAt.Add(2 * time.Minute)
+	replayedAt := createdAt.Add(5 * time.Minute)
+
+	event := &storage.Event{
+		ID:         "test-update-1",
+		Type:       "push",
+		Payload:    []byte(`{"ref": "refs/heads/main"}`),
+		Headers:    []byte(`{"X-GitHub-Event": ["push"], "X-GitHub-Delivery": ["test-update-1"]}`),
+		CreatedAt:  createdAt,
+		Repository: "test/repo",
+		Sender:     "test-user",
+	}
+
+	err = store.StoreEvent(ctx, event)
+	require.NoError(t, err)
+
+	updated := &storage.Event{
+		ID:           event.ID,
+		Type:         "push",
+		Payload:      []byte(`{"ref": "refs/heads/release"}`),
+		Headers:      []byte(`{"X-GitHub-Event": ["push"], "X-GitHub-Delivery": ["test-update-1"], "X-Replayed": ["true"]}`),
+		CreatedAt:    createdAt,
+		ForwardedAt:  &forwardedAt,
+		Error:        "replayed successfully",
+		Repository:   "test/repo",
+		Sender:       "test-user",
+		ReplayedFrom: "original-event-1",
+		ReplayedTime: replayedAt,
+	}
+
+	err = store.UpdateEvent(ctx, updated)
+	require.NoError(t, err)
+
+	stored, err := store.GetEvent(ctx, event.ID)
+	require.NoError(t, err)
+	require.NotNil(t, stored)
+	assert.Equal(t, updated.Payload, stored.Payload)
+	assert.Equal(t, updated.Headers, stored.Headers)
+	assert.NotNil(t, stored.ForwardedAt)
+	assert.Equal(t, updated.ForwardedAt.Unix(), stored.ForwardedAt.Unix())
+	assert.Equal(t, updated.Error, stored.Error)
+	assert.Equal(t, updated.ReplayedFrom, stored.ReplayedFrom)
+	assert.True(t, stored.ReplayedTime.Equal(updated.ReplayedTime))
+
+	listed, total, err := store.ListEvents(ctx, storage.QueryOptions{Limit: 10})
+	require.NoError(t, err)
+	assert.Equal(t, 1, total)
+	require.Len(t, listed, 1)
+	assert.Equal(t, updated.ReplayedFrom, listed[0].ReplayedFrom)
+	assert.True(t, listed[0].ReplayedTime.Equal(updated.ReplayedTime))
+
+	count, err := store.CountEvents(ctx, storage.QueryOptions{})
+	require.NoError(t, err)
+	assert.Equal(t, 1, count)
+}
+
+func TestUpdateEventMissingRow(t *testing.T) {
+	ctx := context.Background()
+	store, err := sql.New("sqlite:file:test_update_missing.db?mode=memory&cache=shared")
+	require.NoError(t, err)
+	defer store.Close()
+
+	now := time.Now().UTC().Truncate(time.Second)
+	err = store.UpdateEvent(ctx, &storage.Event{
+		ID:           "missing-event",
+		Type:         "push",
+		Payload:      []byte(`{"ref": "refs/heads/main"}`),
+		Headers:      []byte(`{"X-GitHub-Event": ["push"]}`),
+		CreatedAt:    now,
+		Repository:   "test/repo",
+		Sender:       "test-user",
+		ReplayedFrom: "original-event-1",
+		ReplayedTime: now.Add(time.Minute),
+	})
+	require.NoError(t, err)
+
+	stored, err := store.GetEvent(ctx, "missing-event")
+	require.NoError(t, err)
+	assert.Nil(t, stored)
+
+	count, err := store.CountEvents(ctx, storage.QueryOptions{})
+	require.NoError(t, err)
+	assert.Equal(t, 0, count)
+}

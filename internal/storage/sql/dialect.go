@@ -49,7 +49,7 @@ func (d *BaseDialect) CreateTableSQL(tableName string) string {
 			repository VARCHAR(255),
 			sender VARCHAR(255),
 			replayed_from VARCHAR(255),
-			original_time %s
+			replayed_time %s
 		);
 		CREATE INDEX IF NOT EXISTS idx_created_at ON %s (created_at);
 		CREATE INDEX IF NOT EXISTS idx_forwarded_at ON %s (forwarded_at);
